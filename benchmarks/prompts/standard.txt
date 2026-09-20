@@ -1,0 +1,1 @@
+Explain in detail the fundamental principles of CPU cache hierarchy, including L1, L2, and L3 caches, cache line size, spatial and temporal locality, and why memory bandwidth is often the primary bottleneck in large language model inference.

@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-09-20T07:36:30Z",
+  "engine": "llama.cpp (Baseline Reference)",
+  "hardware": {
+    "cpu": "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz",
+    "physical_cores": 4,
+    "logical_threads": 8,
+    "avx2": true,
+    "fma": true,
+    "total_ram_gb": 15.8584
+  },
+  "model": {
+    "path": "models\qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "size_mb": 468.636
+  },
+  "config": {
+    "threads": 8,
+    "batch_size": 512,
+    "ctx_size": 2048
+  },
+  "metrics": {
+    "prompt_tokens": 48,
+    "prompt_tok_per_sec": 117.097,
+    "generated_tokens": 128,
+    "gen_tok_per_sec": 30.7484,
+    "ttft_ms": 412.164,
+    "tpot_ms": 32.522,
+    "total_time_ms": 4574.98,
+    "peak_memory_mb": 492.832
+  }
+}

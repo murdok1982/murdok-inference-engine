@@ -1,0 +1,43 @@
+# Build directories
+build/
+bin/
+out/
+.cache/
+
+# Visual Studio / MSVC artifacts
+.vs/
+*.sln
+*.vcxproj*
+*.user
+*.suo
+x64/
+Debug/
+Release/
+*.obj
+*.lib
+*.dll
+*.pdb
+*.ilk
+*.exp
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Model files (never commit huge weights)
+models/*.gguf
+*.gguf
+*.bin
+*.murdok
+
+# Benchmark outputs & temporary files
+benchmarks/results/*.tmp
+benchmarks/results/*_raw.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
