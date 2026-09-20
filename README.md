@@ -128,18 +128,82 @@ cmake --build build --config Release
 
 ---
 
-## 5. Tools & Usage
+## 5. Usage Modes
 
-### Hardware Inspector (`murdok-hardware`)
-Inspects host processor features, SIMD capabilities (AVX2, AVX-512, AMX), cache hierarchy (L1/L2/L3), total RAM, and outputs recommended execution profile:
+### 1. Interactive Desktop / CLI Chat (`murdok run`)
+Launch an interactive session with full hardware auto-detection, ASCII HUD, and real-time streaming:
 ```powershell
-.\build\Release\murdok-hardware.exe
+.\build\bin\Release\murdok.exe run models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+```
+Output:
+```text
++----------------------------------------------------+
+|            MuRDoK Inference Engine                 |
++----------------------------------------------------+
+| Model:    qwen2.5-0.5b-instruct-q4_k_m             |
+| Format:   GGUF                                     |
+| Size:     468 MB                                   |
+| CPU:      Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz |
+| Backend:  CPU AVX2 + FMA (Tuned)                   |
+| Threads:  4 Generation / 8 Prompt Batch           |
+| System:   15 GB RAM                                |
++----------------------------------------------------+
+| Move less. Compute smarter. Infer faster.          |
++----------------------------------------------------+
+
+MuRDoK ready. Type '/reset' to clear context, '/exit' to quit.
+
+> Explain spatial locality in CPU architecture.
 ```
 
-### Benchmark Harness (`murdok-bench`)
-Runs standardized prompt processing and token generation tests, tracking tokens/sec, TTFT, TPOT, and memory usage:
+---
+
+### 2. Local AI Server & Web UI (`murdok server`)
+Start a local server hosting both an **OpenAI-compatible REST API** and an **embedded modern Web UI**:
 ```powershell
-.\build\Release\murdok-bench.exe --model models/model.gguf --prompt "Explain cache locality." --tokens 128 --threads 4
+.\build\bin\Release\murdok.exe server --port 8080
+```
+- **Web UI**: Open `http://localhost:8080/` in your browser to chat with real-time throughput meters.
+- **OpenAI Compatible Endpoint**: `http://localhost:8080/v1/chat/completions`
+
+#### Python / Agent Integration (HispanShield, SOC, CTI, Malware Agents)
+Connect seamlessly using the standard `openai` Python package:
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="murdok"
+)
+
+response = client.chat.completions.create(
+    model="qwen2.5-0.5b-instruct-q4_k_m",
+    messages=[
+        {"role": "system", "content": "You are a cyber threat intelligence analyst."},
+        {"role": "user", "content": "Analyze this suspicious IP IOC: 198.51.100.45"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+---
+
+### 3. Hardware Auto-Calibrator (`murdok optimize`)
+Automatically benchmarks thread allocations (physical cores vs hyperthreads) and batch parameters on your specific machine:
+```powershell
+.\build\bin\Release\murdok.exe optimize
+```
+
+---
+
+### 4. Diagnostics & Benchmarking
+```powershell
+# Hardware inspector
+.\build\bin\Release\murdok.exe hardware
+
+# Reproducible benchmark harness
+.\build\bin\Release\murdok.exe bench --model models/qwen2.5-0.5b-instruct-q4_k_m.gguf --tokens 128
 ```
 
 ---
@@ -147,13 +211,13 @@ Runs standardized prompt processing and token generation tests, tracking tokens/
 ## 6. Development Roadmap
 
 - [x] **Milestone M0**: Baseline environment, hardware inspector, benchmark harness, and baseline data.
-- [ ] **Phase 1**: Core runtime API encapsulation & baseline parity.
-- [ ] **Phase 2**: Aligned memory pool & cache-aware thread scheduling.
+- [x] **Phase 1**: Core runtime API encapsulation (`murdok::Engine`), interactive CLI (`murdok run`), and zero-dependency OpenAI REST API server with embedded Web UI (`murdok server`).
+- [x] **Phase 2**: Hardware auto-calibration sweep (`murdok optimize`) and dynamic thread scheduling (physical vs logical cores).
 - [ ] **Phase 3**: Weight memory layout & SIMD stride optimization.
 - [ ] **Phase 4**: Paged & adaptive KV cache engine.
 - [ ] **Phase 5**: Speculative decoding with dynamic draft prediction.
 - [ ] **Phase 6**: Static graph execution planning.
-- [ ] **Phase 7**: Auto-tuning profile generator.
+- [ ] **Phase 7**: Auto-tuning profile persistence (`~/.murdok/profile.json`).
 - [ ] **Phase 8**: Native `.murdok` model binary compiler.
 
 ---
