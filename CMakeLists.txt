@@ -39,6 +39,8 @@ set(MURDOK_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_library(murdok_core STATIC
     ${MURDOK_SRC_DIR}/hardware/hardware_detect.cpp
     ${MURDOK_SRC_DIR}/runtime/engine.cpp
+    ${MURDOK_SRC_DIR}/runtime/profile_manager.cpp
+    ${MURDOK_SRC_DIR}/kernels/simd_avx2.cpp
 )
 
 target_include_directories(murdok_core PUBLIC

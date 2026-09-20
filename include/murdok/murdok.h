@@ -18,6 +18,7 @@ struct EngineConfig {
     float temperature = 0.7f;
     float top_p = 0.9f;
     int32_t max_tokens = 512;
+    std::string kv_type = "f16"; // "f16", "q8_0", "q4_0"
     bool verbose = false;
 };
 

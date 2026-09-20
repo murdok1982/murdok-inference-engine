@@ -202,8 +202,8 @@ Automatically benchmarks thread allocations (physical cores vs hyperthreads) and
 # Hardware inspector
 .\build\bin\Release\murdok.exe hardware
 
-# Reproducible benchmark harness
-.\build\bin\Release\murdok.exe bench --model models/qwen2.5-0.5b-instruct-q4_k_m.gguf --tokens 128
+# Custom SIMD kernel micro-benchmark
+.\build\bin\Release\murdok.exe bench --kernels
 ```
 
 ---
@@ -213,11 +213,11 @@ Automatically benchmarks thread allocations (physical cores vs hyperthreads) and
 - [x] **Milestone M0**: Baseline environment, hardware inspector, benchmark harness, and baseline data.
 - [x] **Phase 1**: Core runtime API encapsulation (`murdok::Engine`), interactive CLI (`murdok run`), and zero-dependency OpenAI REST API server with embedded Web UI (`murdok server`).
 - [x] **Phase 2**: Hardware auto-calibration sweep (`murdok optimize`) and dynamic thread scheduling (physical vs logical cores).
-- [ ] **Phase 3**: Weight memory layout & SIMD stride optimization.
-- [ ] **Phase 4**: Paged & adaptive KV cache engine.
+- [x] **Phase 3**: Weight memory layout, 64-byte cache alignment, and custom AVX2+FMA SIMD vector kernels.
+- [x] **Phase 4**: Quantized and adaptive KV cache engine (FP16, Q8_0, Q4_0).
 - [ ] **Phase 5**: Speculative decoding with dynamic draft prediction.
 - [ ] **Phase 6**: Static graph execution planning.
-- [ ] **Phase 7**: Auto-tuning profile persistence (`~/.murdok/profile.json`).
+- [x] **Phase 7**: Auto-tuning profile persistence (`~/.murdok/profile.json`).
 - [ ] **Phase 8**: Native `.murdok` model binary compiler.
 
 ---

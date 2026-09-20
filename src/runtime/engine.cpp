@@ -1,5 +1,7 @@
 #include "murdok/murdok.h"
+#include "murdok/profile_manager.h"
 #include "llama.h"
+#include "ggml.h"
 
 #include <iostream>
 #include <chrono>
@@ -67,6 +69,15 @@ public:
         cleanup();
         config_ = config;
 
+        // Load persisted calibration profile if available
+        MurdokProfile profile;
+        if (ProfileManager::load_profile(profile)) {
+            if (config_.n_threads_gen <= 0) config_.n_threads_gen = profile.optimal_gen_threads;
+            if (config_.n_threads_prompt <= 0) config_.n_threads_prompt = profile.optimal_prompt_threads;
+            if (config_.n_batch <= 0) config_.n_batch = profile.optimal_batch_size;
+            if (config_.kv_type.empty() || config_.kv_type == "f16") config_.kv_type = profile.kv_cache_type;
+        }
+
         // Auto-configure optimal thread counts based on empirical cache topology findings
         if (config_.n_threads_gen <= 0) {
             config_.n_threads_gen = hw_.physical_cores > 0 ? hw_.physical_cores : 4;
@@ -97,6 +108,18 @@ public:
         cparams.n_batch = config_.n_batch;
         cparams.n_threads = config_.n_threads_gen;
         cparams.n_threads_batch = config_.n_threads_prompt;
+
+        // KV Cache Quantization configuration (Phase 4)
+        if (config_.kv_type == "q8_0") {
+            cparams.type_k = GGML_TYPE_Q8_0;
+            cparams.type_v = GGML_TYPE_Q8_0;
+        } else if (config_.kv_type == "q4_0") {
+            cparams.type_k = GGML_TYPE_Q4_0;
+            cparams.type_v = GGML_TYPE_Q4_0;
+        } else {
+            cparams.type_k = GGML_TYPE_F16;
+            cparams.type_v = GGML_TYPE_F16;
+        }
 
         ctx_ = llama_init_from_model(model_, cparams);
         if (!ctx_) {

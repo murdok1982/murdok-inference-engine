@@ -1,4 +1,6 @@
 #include "murdok/murdok.h"
+#include "murdok/profile_manager.h"
+#include "murdok/kernels.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -229,16 +231,33 @@ static int cmd_optimize(int argc, char* argv[]) {
         }
     }
 
+    // Persist calibration profile to ~/.murdok/profile.json (Phase 7)
+    murdok::MurdokProfile profile;
+    profile.cpu_model = hw.cpu_brand;
+    profile.recommended_profile = murdok::HardwareDetector::profile_to_string(hw.recommended_profile);
+    profile.optimal_gen_threads = best_gen_threads;
+    profile.optimal_prompt_threads = best_prompt_threads;
+    profile.optimal_batch_size = 512;
+    profile.kv_cache_type = "f16";
+    profile.cache_line_alignment = 64;
+    profile.measured_gen_tok_s = best_gen_toks;
+    profile.measured_prompt_tok_s = best_prompt_toks;
+
+    bool saved = murdok::ProfileManager::save_profile(profile);
+
     std::cout << "\n+----------------------------------------------------+\n";
     std::cout << "|         MuRDoK Optimal Calibrated Profile          |\n";
     std::cout << "+----------------------------------------------------+\n";
     std::cout << "| Best Generation Threads:  " << std::left << std::setw(25) << (std::to_string(best_gen_threads) + " (Bandwidth tuned)") << "|\n";
     std::cout << "| Best Prompt Batch Threads:" << std::left << std::setw(25) << (std::to_string(best_prompt_threads) + " (Compute tuned)") << "|\n";
-    std::cout << "| Recommended Profile:      " << std::left << std::setw(25) << murdok::HardwareDetector::profile_to_string(hw.recommended_profile) << "|\n";
+    std::cout << "| Recommended Profile:      " << std::left << std::setw(25) << profile.recommended_profile << "|\n";
     std::cout << "| Recommended Batch Size:   512                      |\n";
     std::cout << "| Target Memory Alignment:  64 bytes (Cache Line)    |\n";
+    if (saved) {
+        std::cout << "| Saved Profile:            ~/.murdok/profile.json   |\n";
+    }
     std::cout << "+----------------------------------------------------+\n";
-    std::cout << "Calibrated settings automatically applied to 'murdok run'.\n";
+    std::cout << "Calibrated profile saved. Automatically applied to 'murdok run' and 'murdok server'.\n";
 
     return 0;
 }
@@ -270,6 +289,21 @@ int main(int argc, char* argv[]) {
         }
         return system(cmdline.c_str());
     } else if (cmd == "bench") {
+        if (argc > 2 && std::string(argv[2]) == "--kernels") {
+            std::cout << "==========================================================\n";
+            std::cout << "      MuRDoK SIMD Vectorized Kernel Micro-Benchmark       \n";
+            std::cout << "==========================================================\n";
+            std::cout << "Benchmarking custom AVX2+FMA vs Scalar Dot-Product...\n\n";
+
+            auto kres = murdok::kernels::benchmark_simd_kernels(65536, 10000);
+            std::cout << "Scalar Implementation:   " << std::fixed << std::setprecision(2) << kres.scalar_gflops << " GFLOP/s\n";
+            std::cout << "MuRDoK AVX2+FMA Kernel:  " << std::fixed << std::setprecision(2) << kres.avx2_gflops << " GFLOP/s\n";
+            std::cout << "Speedup Factor:          " << std::fixed << std::setprecision(2) << kres.speedup << "x faster\n";
+            std::cout << "Numerical Precision:     " << (kres.avx2_verified ? "[VERIFIED IDENTICAL]" : "[MISMATCH]") << "\n";
+            std::cout << "Memory Alignment:        64 bytes (Cache Line Aligned)\n";
+            std::cout << "==========================================================\n";
+            return 0;
+        }
         std::string bench_exe = "murdok-bench.exe";
         if (fs::exists("build/bin/Release/murdok-bench.exe")) {
             bench_exe = "build\\bin\\Release\\murdok-bench.exe";
