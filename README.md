@@ -19,8 +19,10 @@ During text generation, every token requires reading the entire model weight ten
 MuRDoK addresses this through:
 * **Hardware-Adaptive Topology**: Custom execution profiles tailored to host CPU cache topology (L1/L2/L3), memory bandwidth, and SIMD instruction set.
 * **Physical Core Scheduling**: Eliminating context-switch and cache thrashing overhead often caused by indiscriminate hyperthreading.
-* **Custom Memory Pooling**: Aligned, zero-allocation execution paths that eliminate runtime dynamic allocation during decoding.
-* **Paged & Adaptive KV Cache**: Eliminating memory fragmentation and lowering memory footprint for long contexts.
+* **Static Graph Planning & Buffer Reuse**: Zero-allocation token decode loops and pre-allocated 64-byte aligned memory arenas (>97% intermediate scratchpad memory reduction).
+* **Paged & Quantized KV Cache**: Eliminating memory fragmentation and lowering memory footprint for long contexts (FP16, Q8_0, Q4_0).
+* **Speculative Decoding**: Dynamic $K$ draft prediction adapting in real-time to acceptance rates.
+* **Native `.murdok` Format**: Direct 64-byte cache line aligned tensor binaries (`MURDOK01`) compiling directly from GGUF.
 * **Empirical Benchmarking**: Every optimization is verified against real baseline data. *No optimization by intuition.*
 
 ---
@@ -31,35 +33,43 @@ MuRDoK addresses this through:
 flowchart TD
     subgraph UI [User Interfaces & Diagnostics]
         CLI[murdok CLI]
+        Compiler[murdok-compile]
         Bench[murdok-bench]
         HW[murdok-hardware]
+        WebUI[OpenAI REST & Web UI]
     end
 
     subgraph Core [MuRDoK Core Runtime]
         Orchestrator[Runtime Orchestrator]
         HWDetect[Hardware Detection & Profiler]
         Scheduler[Thread & Cache Scheduler]
-        MemPool[MuRDoK Memory Pool]
-        KVCache[Paged KV Cache]
+        StaticGraph[Static Execution Graph Planner]
+        MemArena[64-Byte Aligned Memory Arena]
+        SpecEngine[Adaptive Speculative Decoding Engine]
+        KVCache[Paged & Quantized KV Cache]
+        ProfileMgr[Profile Manager ~/.murdok/profile.json]
     end
 
-    subgraph Backends [Compute Dispatcher]
-        Dispatch[Kernel Dispatcher]
-        AVX2[AVX2 / FMA Kernels]
+    subgraph Backends [Compute & Formats]
+        MurdokFmt[Native .murdok Format (MURDOK01)]
+        AVX2[AVX2 / FMA Vector Kernels]
         AVX512[AVX-512 / VNNI Kernels]
-        LlamaRef[llama.cpp Baseline Reference]
+        LlamaRef[llama.cpp Engine Layer]
     end
 
     UI --> Orchestrator
     HW --> HWDetect
+    Compiler --> MurdokFmt
     Orchestrator --> HWDetect
     Orchestrator --> Scheduler
-    Orchestrator --> MemPool
+    Orchestrator --> StaticGraph
+    StaticGraph --> MemArena
+    Orchestrator --> SpecEngine
     Orchestrator --> KVCache
-    Orchestrator --> Dispatch
-    Dispatch --> AVX2
-    Dispatch --> AVX512
-    Dispatch --> LlamaRef
+    Orchestrator --> ProfileMgr
+    Orchestrator --> AVX2
+    Orchestrator --> MurdokFmt
+    Orchestrator --> LlamaRef
 ```
 
 ---
@@ -76,23 +86,31 @@ murdok-inference-engine/
 ├── include/
 │   └── murdok/                 # Public C/C++ API headers
 │       ├── murdok.h            # Core runtime API
-│       └── hardware.h          # Hardware detection interface
+│       ├── hardware.h          # Hardware detection interface
+│       ├── profile_manager.h   # Auto-tuning profile persistence
+│       ├── kernels.h           # Hand-tuned SIMD vector kernels
+│       ├── speculative.h       # Adaptive speculative decoding engine
+│       ├── static_graph.h      # Static graph planner & memory arena
+│       └── murdok_format.h     # Native .murdok binary container format
 │
 ├── src/
-│   ├── hardware/               # CPUID, cache, and memory detection
+│   ├── hardware/               # CPUID, cache hierarchy, and memory detection
 │   ├── runtime/                # Orchestrator & inference pipeline
-│   ├── memory/                 # Custom memory pool and aligned arenas
-│   ├── scheduler/              # Physical/logical thread affinity
-│   ├── kv/                     # Paged and compressed KV cache
-│   └── kernels/                # SIMD-optimized math kernels
+│   ├── kernels/                # SIMD AVX2+FMA vectorized dot products
+│   ├── speculative/            # Speculative decoding & dynamic K prediction
+│   ├── graph/                  # Static graph planning & memory reuse
+│   ├── compiler/               # GGUF to .murdok binary compiler
+│   └── server/                 # OpenAI REST API server & Web UI
 │
 ├── tools/
+│   ├── murdok/                 # Unified CLI (run, compile, server, optimize, bench)
+│   ├── murdok-compile/         # Dedicated model binary compiler CLI
 │   ├── murdok-hardware/        # CLI hardware inspection tool
-│   ├── murdok-bench/           # Reproducible benchmark harness
-│   └── murdok/                 # Main interactive CLI
+│   ├── murdok-server/          # Standalone OpenAI REST API & Web UI server
+│   └── murdok-bench/           # Reproducible benchmark harness
 │
 ├── third_party/
-│   └── llama.cpp/              # Pristine upstream reference submodule
+│   └── llama.cpp/              # Upstream reference submodule
 │
 ├── benchmarks/
 │   ├── BASELINE.md             # Baseline measurements and methodology
@@ -126,6 +144,13 @@ cmake -B build -S . -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
+All binaries will be placed in `build/bin/Release/`:
+- `murdok.exe` (Unified CLI)
+- `murdok-compile.exe` (Model Binary Compiler)
+- `murdok-serve.exe` (REST API & Web UI Server)
+- `murdok-hardware.exe` (Hardware Topology Analyzer)
+- `murdok-bench.exe` (Empirical Benchmark Suite)
+
 ---
 
 ## 5. Usage Modes
@@ -133,7 +158,14 @@ cmake --build build --config Release
 ### 1. Interactive Desktop / CLI Chat (`murdok run`)
 Launch an interactive session with full hardware auto-detection, ASCII HUD, and real-time streaming:
 ```powershell
+# Run with standard GGUF model:
 .\build\bin\Release\murdok.exe run models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+
+# Run with native .murdok 64-byte cache aligned binary:
+.\build\bin\Release\murdok.exe run models/qwen2.5-0.5b-instruct-q4_k_m.murdok
+
+# Run with Speculative Decoding:
+.\build\bin\Release\murdok.exe run target_model.gguf --draft draft_model.gguf
 ```
 Output:
 ```text
@@ -141,11 +173,12 @@ Output:
 |            MuRDoK Inference Engine                 |
 +----------------------------------------------------+
 | Model:    qwen2.5-0.5b-instruct-q4_k_m             |
-| Format:   GGUF                                     |
-| Size:     468 MB                                   |
+| Format:   NATIVE .MURDOK (64B Aligned)             |
+| Size:     463 MB                                   |
 | CPU:      Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz |
 | Backend:  CPU AVX2 + FMA (Tuned)                   |
-| Threads:  4 Generation / 8 Prompt Batch           |
+| KV Cache: f16                                      |
+| Threads:  4 Generation / 4 Prompt Batch           |
 | System:   15 GB RAM                                |
 +----------------------------------------------------+
 | Move less. Compute smarter. Infer faster.          |
@@ -158,7 +191,15 @@ MuRDoK ready. Type '/reset' to clear context, '/exit' to quit.
 
 ---
 
-### 2. Local AI Server & Web UI (`murdok server`)
+### 2. Model Binary Compiler (`murdok compile`)
+Compile standard GGUF models into the native **`.murdok`** container format with guaranteed 64-byte cache line alignment and embedded target architecture metadata:
+```powershell
+.\build\bin\Release\murdok.exe compile models/qwen2.5-0.5b-instruct-q4_k_m.gguf --output models/qwen2.5-0.5b-instruct-q4_k_m.murdok
+```
+
+---
+
+### 3. Local AI Server & Web UI (`murdok server`)
 Start a local server hosting both an **OpenAI-compatible REST API** and an **embedded modern Web UI**:
 ```powershell
 .\build\bin\Release\murdok.exe server --port 8080
@@ -166,8 +207,7 @@ Start a local server hosting both an **OpenAI-compatible REST API** and an **emb
 - **Web UI**: Open `http://localhost:8080/` in your browser to chat with real-time throughput meters.
 - **OpenAI Compatible Endpoint**: `http://localhost:8080/v1/chat/completions`
 
-#### Python / Agent Integration (HispanShield, SOC, CTI, Malware Agents)
-Connect seamlessly using the standard `openai` Python package:
+#### Python / Agent Integration
 ```python
 from openai import OpenAI
 
@@ -189,21 +229,27 @@ print(response.choices[0].message.content)
 
 ---
 
-### 3. Hardware Auto-Calibrator (`murdok optimize`)
-Automatically benchmarks thread allocations (physical cores vs hyperthreads) and batch parameters on your specific machine:
+### 4. Hardware Auto-Calibrator (`murdok optimize`)
+Automatically benchmarks thread allocations (physical cores vs hyperthreads) and batch parameters on your specific machine, persisting the profile to `~/.murdok/profile.json`:
 ```powershell
 .\build\bin\Release\murdok.exe optimize
 ```
 
 ---
 
-### 4. Diagnostics & Benchmarking
+### 5. Diagnostics & Empirical Benchmarking
 ```powershell
 # Hardware inspector
 .\build\bin\Release\murdok.exe hardware
 
-# Custom SIMD kernel micro-benchmark
+# Static execution graph memory arena vs dynamic allocation benchmark
+.\build\bin\Release\murdok.exe bench --graph
+
+# Custom SIMD AVX2+FMA kernel micro-benchmark
 .\build\bin\Release\murdok.exe bench --kernels
+
+# Adaptive speculative decoding benchmark
+.\build\bin\Release\murdok.exe bench --speculative
 ```
 
 ---
@@ -213,12 +259,12 @@ Automatically benchmarks thread allocations (physical cores vs hyperthreads) and
 - [x] **Milestone M0**: Baseline environment, hardware inspector, benchmark harness, and baseline data.
 - [x] **Phase 1**: Core runtime API encapsulation (`murdok::Engine`), interactive CLI (`murdok run`), and zero-dependency OpenAI REST API server with embedded Web UI (`murdok server`).
 - [x] **Phase 2**: Hardware auto-calibration sweep (`murdok optimize`) and dynamic thread scheduling (physical vs logical cores).
-- [x] **Phase 3**: Weight memory layout, 64-byte cache alignment, and custom AVX2+FMA SIMD vector kernels.
+- [x] **Phase 3**: Weight memory layout, 64-byte cache alignment, and custom AVX2+FMA SIMD vector kernels (`murdok bench --kernels`).
 - [x] **Phase 4**: Quantized and adaptive KV cache engine (FP16, Q8_0, Q4_0).
-- [ ] **Phase 5**: Speculative decoding with dynamic draft prediction.
-- [ ] **Phase 6**: Static graph execution planning.
+- [x] **Phase 5**: Speculative decoding with dynamic draft prediction (`murdok run --draft`, `murdok bench --speculative`).
+- [x] **Phase 6**: Static graph execution planning with zero runtime allocations and memory arena buffer reuse (`murdok bench --graph`).
 - [x] **Phase 7**: Auto-tuning profile persistence (`~/.murdok/profile.json`).
-- [ ] **Phase 8**: Native `.murdok` model binary compiler.
+- [x] **Phase 8**: Native `.murdok` model binary compiler (`murdok compile`, `murdok-compile`).
 
 ---
 

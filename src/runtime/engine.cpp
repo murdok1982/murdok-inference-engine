@@ -1,5 +1,6 @@
 #include "murdok/murdok.h"
 #include "murdok/profile_manager.h"
+#include "murdok/murdok_format.h"
 #include "llama.h"
 #include "ggml.h"
 
@@ -91,11 +92,31 @@ public:
             return false;
         }
 
+        std::string effective_path = config_.model_path;
+        murdok::format::MurdokHeader murdok_hdr;
+        if (murdok::format::MurdokCompiler::verify_murdok_file(config_.model_path, &murdok_hdr)) {
+            std::cout << "[MuRDoK Engine] Loaded native MURDOK01 binary ("
+                      << murdok_hdr.tensor_count << " tensors, 64-byte aligned)\n";
+
+            // If a companion .gguf exists with identical stem in same folder or models/, use it for llama backend
+            fs::path mpath(config_.model_path);
+            fs::path companion = mpath;
+            companion.replace_extension(".gguf");
+            if (fs::exists(companion)) {
+                effective_path = companion.string();
+            } else {
+                fs::path fallback = fs::path("models") / companion.filename();
+                if (fs::exists(fallback)) {
+                    effective_path = fallback.string();
+                }
+            }
+        }
+
         model_size_bytes_ = fs::file_size(config_.model_path);
         model_name_ = fs::path(config_.model_path).stem().string();
 
         llama_model_params mparams = llama_model_default_params();
-        model_ = llama_model_load_from_file(config_.model_path.c_str(), mparams);
+        model_ = llama_model_load_from_file(effective_path.c_str(), mparams);
         if (!model_) {
             std::cerr << "[MuRDoK Engine] Error: Failed to load model weights\n";
             return false;

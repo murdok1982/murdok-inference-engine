@@ -41,6 +41,9 @@ add_library(murdok_core STATIC
     ${MURDOK_SRC_DIR}/runtime/engine.cpp
     ${MURDOK_SRC_DIR}/runtime/profile_manager.cpp
     ${MURDOK_SRC_DIR}/kernels/simd_avx2.cpp
+    ${MURDOK_SRC_DIR}/compiler/murdok_compiler.cpp
+    ${MURDOK_SRC_DIR}/speculative/speculative_engine.cpp
+    ${MURDOK_SRC_DIR}/graph/static_graph.cpp
 )
 
 target_include_directories(murdok_core PUBLIC
@@ -52,7 +55,7 @@ target_include_directories(murdok_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor
 )
 
-target_link_libraries(murdok_core PUBLIC llama)
+target_link_libraries(murdok_core PUBLIC llama ggml)
 
 # Tool: murdok-hardware
 add_executable(murdok-hardware
@@ -64,7 +67,13 @@ target_link_libraries(murdok-hardware PRIVATE murdok_core)
 add_executable(murdok-bench
     tools/murdok-bench/main.cpp
 )
-target_link_libraries(murdok-bench PRIVATE murdok_core llama)
+target_link_libraries(murdok-bench PRIVATE murdok_core llama ggml)
+
+# Tool: murdok-compile
+add_executable(murdok-compile
+    tools/murdok-compile/main.cpp
+)
+target_link_libraries(murdok-compile PRIVATE murdok_core llama ggml)
 
 # Tool: murdok-server
 add_executable(murdok-server
@@ -84,6 +93,7 @@ target_link_libraries(murdok PRIVATE murdok_core)
 if (WIN32)
     target_link_libraries(murdok_core PUBLIC psapi)
     target_link_libraries(murdok-bench PRIVATE psapi)
+    target_link_libraries(murdok-compile PRIVATE psapi)
     target_link_libraries(murdok-server PRIVATE ws2_32 psapi)
     target_link_libraries(murdok PRIVATE ws2_32 psapi)
 endif()
