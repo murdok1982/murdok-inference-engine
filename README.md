@@ -31,30 +31,30 @@ MuRDoK addresses this through:
 
 ```mermaid
 flowchart TD
-    subgraph UI [User Interfaces & Diagnostics]
-        CLI[murdok CLI]
-        Compiler[murdok-compile]
-        Bench[murdok-bench]
-        HW[murdok-hardware]
-        WebUI[OpenAI REST & Web UI]
+    subgraph UI ["User Interfaces & Diagnostics"]
+        CLI["murdok CLI"]
+        Compiler["murdok-compile"]
+        Bench["murdok-bench"]
+        HW["murdok-hardware"]
+        WebUI["OpenAI REST & Web UI"]
     end
 
-    subgraph Core [MuRDoK Core Runtime]
-        Orchestrator[Runtime Orchestrator]
-        HWDetect[Hardware Detection & Profiler]
-        Scheduler[Thread & Cache Scheduler]
-        StaticGraph[Static Execution Graph Planner]
-        MemArena[64-Byte Aligned Memory Arena]
-        SpecEngine[Adaptive Speculative Decoding Engine]
-        KVCache[Paged & Quantized KV Cache]
-        ProfileMgr[Profile Manager ~/.murdok/profile.json]
+    subgraph Core ["MuRDoK Core Runtime"]
+        Orchestrator["Runtime Orchestrator"]
+        HWDetect["Hardware Detection & Profiler"]
+        Scheduler["Thread & Cache Scheduler"]
+        StaticGraph["Static Execution Graph Planner"]
+        MemArena["64-Byte Aligned Memory Arena"]
+        SpecEngine["Adaptive Speculative Decoding Engine"]
+        KVCache["Paged & Quantized KV Cache"]
+        ProfileMgr["Profile Manager (~/.murdok/profile.json)"]
     end
 
-    subgraph Backends [Compute & Formats]
-        MurdokFmt[Native .murdok Format (MURDOK01)]
-        AVX2[AVX2 / FMA Vector Kernels]
-        AVX512[AVX-512 / VNNI Kernels]
-        LlamaRef[llama.cpp Engine Layer]
+    subgraph Backends ["Compute & Formats"]
+        MurdokFmt["Native .murdok Format (MURDOK01)"]
+        AVX2["AVX2 / FMA Vector Kernels"]
+        AVX512["AVX-512 / VNNI Kernels"]
+        LlamaRef["llama.cpp Engine Layer"]
     end
 
     UI --> Orchestrator
