@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-20T07:36:30Z",
+  "timestamp": "2026-09-25T12:16:22Z",
   "engine": "llama.cpp (Baseline Reference)",
   "hardware": {
     "cpu": "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz",
@@ -10,7 +10,7 @@
     "total_ram_gb": 15.8584
   },
   "model": {
-    "path": "models\qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "path": "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
     "size_mb": 468.636
   },
   "config": {
@@ -19,13 +19,13 @@
     "ctx_size": 2048
   },
   "metrics": {
-    "prompt_tokens": 48,
-    "prompt_tok_per_sec": 117.097,
+    "prompt_tokens": 11,
+    "prompt_tok_per_sec": 135.515,
     "generated_tokens": 128,
-    "gen_tok_per_sec": 30.7484,
-    "ttft_ms": 412.164,
-    "tpot_ms": 32.522,
-    "total_time_ms": 4574.98,
-    "peak_memory_mb": 492.832
+    "gen_tok_per_sec": 39.9231,
+    "ttft_ms": 83.5688,
+    "tpot_ms": 25.0481,
+    "total_time_ms": 3289.73,
+    "peak_memory_mb": 489.922
   }
 }

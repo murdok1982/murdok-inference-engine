@@ -9,14 +9,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
-# Optimization flags for MSVC
+# Baseline portable optimization flags (NO global AVX2 to prevent SIGILL crashes on non-AVX2 hosts)
 if (MSVC)
     add_compile_options(/W3 /O2 /Oi)
-    # Enable AVX2 on host
-    add_compile_options(/arch:AVX2)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
-    add_compile_options(-Wall -Wextra -O3 -mavx2 -mfma)
+    add_compile_options(-Wall -Wextra -O3)
 endif()
 
 # Upstream llama.cpp submodule options
@@ -39,12 +37,21 @@ set(MURDOK_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_library(murdok_core STATIC
     ${MURDOK_SRC_DIR}/hardware/hardware_detect.cpp
     ${MURDOK_SRC_DIR}/runtime/engine.cpp
+    ${MURDOK_SRC_DIR}/runtime/llama_backend.cpp
+    ${MURDOK_SRC_DIR}/runtime/murdok_backend.cpp
     ${MURDOK_SRC_DIR}/runtime/profile_manager.cpp
     ${MURDOK_SRC_DIR}/kernels/simd_avx2.cpp
     ${MURDOK_SRC_DIR}/compiler/murdok_compiler.cpp
     ${MURDOK_SRC_DIR}/speculative/speculative_engine.cpp
     ${MURDOK_SRC_DIR}/graph/static_graph.cpp
 )
+
+# Apply AVX2/FMA vector flags ONLY to the isolated SIMD kernel translation unit
+if (MSVC)
+    set_source_files_properties(${MURDOK_SRC_DIR}/kernels/simd_avx2.cpp PROPERTIES COMPILE_FLAGS "/arch:AVX2")
+else()
+    set_source_files_properties(${MURDOK_SRC_DIR}/kernels/simd_avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+endif()
 
 target_include_directories(murdok_core PUBLIC
     ${MURDOK_INCLUDE_DIR}
@@ -63,19 +70,19 @@ add_executable(murdok-hardware
 )
 target_link_libraries(murdok-hardware PRIVATE murdok_core)
 
-# Tool: murdok-bench
+# Tool: murdok-bench (Standalone)
 add_executable(murdok-bench
     tools/murdok-bench/main.cpp
 )
 target_link_libraries(murdok-bench PRIVATE murdok_core llama ggml)
 
-# Tool: murdok-compile
+# Tool: murdok-compile (Standalone)
 add_executable(murdok-compile
     tools/murdok-compile/main.cpp
 )
 target_link_libraries(murdok-compile PRIVATE murdok_core llama ggml)
 
-# Tool: murdok-server
+# Tool: murdok-server (Standalone)
 add_executable(murdok-server
     tools/murdok-server/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor/cpp-httplib/httplib.cpp
@@ -83,17 +90,40 @@ add_executable(murdok-server
 set_target_properties(murdok-server PROPERTIES OUTPUT_NAME "murdok-serve")
 target_link_libraries(murdok-server PRIVATE murdok_core)
 
-# Tool: murdok CLI
+# Tool: murdok Unified In-Process CLI (No shell system() calls)
 add_executable(murdok
     tools/murdok/main.cpp
+    tools/murdok-server/main.cpp
+    tools/murdok-bench/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/vendor/cpp-httplib/httplib.cpp
 )
-target_link_libraries(murdok PRIVATE murdok_core)
+set_target_properties(murdok PROPERTIES COMPILE_DEFINITIONS "MURDOK_NO_SERVER_MAIN;MURDOK_NO_BENCH_MAIN")
+target_include_directories(murdok PRIVATE
+    tools/murdok-server
+    tools/murdok-bench
+)
+target_link_libraries(murdok PRIVATE murdok_core llama ggml)
+
+# Test Suite Target: murdok-test
+enable_testing()
+add_executable(murdok-test
+    tests/main.cpp
+    tests/test_hardware.cpp
+    tests/test_kernels.cpp
+    tests/test_arena.cpp
+    tests/test_format.cpp
+    tests/test_runtime.cpp
+)
+target_link_libraries(murdok-test PRIVATE murdok_core llama ggml)
+add_test(NAME MurdokTestSuite COMMAND murdok-test)
 
 # Windows system libraries
 if (WIN32)
     target_link_libraries(murdok_core PUBLIC psapi)
+    target_link_libraries(murdok-hardware PRIVATE psapi)
     target_link_libraries(murdok-bench PRIVATE psapi)
     target_link_libraries(murdok-compile PRIVATE psapi)
     target_link_libraries(murdok-server PRIVATE ws2_32 psapi)
     target_link_libraries(murdok PRIVATE ws2_32 psapi)
+    target_link_libraries(murdok-test PRIVATE ws2_32 psapi)
 endif()

@@ -43,6 +43,15 @@ struct MurdokTensorEntry {
 };
 #pragma pack(pop)
 
+struct ContainerValidationResult {
+    bool is_valid = false;
+    std::string error_message;
+    uint32_t tensor_count = 0;
+    uint32_t alignment = 0;
+    uint32_t version = 0;
+    uint64_t total_size = 0;
+};
+
 class MurdokCompiler {
 public:
     static bool compile_gguf_to_murdok(
@@ -52,6 +61,7 @@ public:
     );
 
     static bool verify_murdok_file(const std::string& murdok_path, MurdokHeader* out_hdr = nullptr);
+    static ContainerValidationResult validate_container(const std::string& murdok_path);
 };
 
 } // namespace format

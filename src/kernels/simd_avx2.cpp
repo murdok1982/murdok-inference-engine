@@ -1,4 +1,5 @@
 #include "murdok/kernels.h"
+#include "murdok/hardware.h"
 
 #include <immintrin.h>
 #include <chrono>
@@ -9,6 +10,7 @@ namespace murdok {
 namespace kernels {
 
 float vec_dot_f32_scalar(const float* a, const float* b, size_t n) {
+    if (!a || !b || n == 0) return 0.0f;
     float sum = 0.0f;
     for (size_t i = 0; i < n; ++i) {
         sum += a[i] * b[i];
@@ -17,8 +19,15 @@ float vec_dot_f32_scalar(const float* a, const float* b, size_t n) {
 }
 
 float vec_dot_f32_avx2(const float* a, const float* b, size_t n) {
+    if (!a || !b || n == 0) return 0.0f;
+
+    // For short vectors (< 8), fallback directly to scalar
+    if (n < 8) {
+        return vec_dot_f32_scalar(a, b, n);
+    }
+
     // 4 accumulators unrolled (32 floats = 128 bytes per loop iteration)
-    // Saturates Skylake / Kaby Lake FMA pipeline with 2 parallel ports
+    // Saturates Skylake / Kaby Lake / Zen FMA pipeline with 2 parallel ports
     __m256 acc0 = _mm256_setzero_ps();
     __m256 acc1 = _mm256_setzero_ps();
     __m256 acc2 = _mm256_setzero_ps();
@@ -61,7 +70,7 @@ float vec_dot_f32_avx2(const float* a, const float* b, size_t n) {
     sum128 = _mm_hadd_ps(sum128, sum128);
     float total = _mm_cvtss_f32(sum128);
 
-    // Remaining tail elements
+    // Remaining tail elements (scalar accumulation)
     for (; i < n; ++i) {
         total += a[i] * b[i];
     }
@@ -69,7 +78,20 @@ float vec_dot_f32_avx2(const float* a, const float* b, size_t n) {
     return total;
 }
 
+void vec_axpy_f32_scalar(float* dst, const float* src, float alpha, size_t n) {
+    if (!dst || !src || n == 0) return;
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] += alpha * src[i];
+    }
+}
+
 void vec_axpy_f32_avx2(float* dst, const float* src, float alpha, size_t n) {
+    if (!dst || !src || n == 0) return;
+    if (n < 8) {
+        vec_axpy_f32_scalar(dst, src, alpha, n);
+        return;
+    }
+
     __m256 valpha = _mm256_set1_ps(alpha);
     size_t i = 0;
     for (; i + 7 < n; i += 8) {
@@ -83,6 +105,23 @@ void vec_axpy_f32_avx2(float* dst, const float* src, float alpha, size_t n) {
     }
 }
 
+void vec_axpy_f32(float* dst, const float* src, float alpha, size_t n) {
+    static bool has_avx2 = HardwareDetector::detect().simd.avx2;
+    if (has_avx2) {
+        vec_axpy_f32_avx2(dst, src, alpha, n);
+    } else {
+        vec_axpy_f32_scalar(dst, src, alpha, n);
+    }
+}
+
+DotProductFn get_best_dot_product_kernel() {
+    const auto& hw = HardwareDetector::detect();
+    if (hw.simd.avx2 && hw.simd.fma) {
+        return vec_dot_f32_avx2;
+    }
+    return vec_dot_f32_scalar;
+}
+
 KernelBenchmarkResult benchmark_simd_kernels(size_t vector_size, int iterations) {
     KernelBenchmarkResult res;
 
@@ -90,10 +129,10 @@ KernelBenchmarkResult benchmark_simd_kernels(size_t vector_size, int iterations)
     std::vector<float> b(vector_size, 2.0f);
 
     // 1. Scalar benchmark
+    volatile float s_sum = 0.0f;
     auto t0 = std::chrono::high_resolution_clock::now();
-    float s_sum = 0.0f;
     for (int it = 0; it < iterations; ++it) {
-        s_sum += vec_dot_f32_scalar(a.data(), b.data(), vector_size);
+        s_sum = vec_dot_f32_scalar(a.data(), b.data(), vector_size);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
     double s_sec = std::chrono::duration<double>(t1 - t0).count();
@@ -101,10 +140,10 @@ KernelBenchmarkResult benchmark_simd_kernels(size_t vector_size, int iterations)
     res.scalar_gflops = (total_flops / s_sec) / 1e9;
 
     // 2. AVX2 benchmark
+    volatile float v_sum = 0.0f;
     auto t2 = std::chrono::high_resolution_clock::now();
-    float v_sum = 0.0f;
     for (int it = 0; it < iterations; ++it) {
-        v_sum += vec_dot_f32_avx2(a.data(), b.data(), vector_size);
+        v_sum = vec_dot_f32_avx2(a.data(), b.data(), vector_size);
     }
     auto t3 = std::chrono::high_resolution_clock::now();
     double v_sec = std::chrono::duration<double>(t3 - t2).count();

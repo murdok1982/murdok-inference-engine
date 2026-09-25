@@ -1,4 +1,5 @@
 #include "murdok/hardware.h"
+#include "bench.h"
 #include "llama.h"
 
 #include <iostream>
@@ -157,7 +158,10 @@ static std::string get_current_iso_time() {
     return std::string(str);
 }
 
-int main(int argc, char* argv[]) {
+namespace murdok {
+namespace bench {
+
+int run_murdok_bench(int argc, char* argv[]) {
     BenchConfig config;
     if (!parse_args(argc, argv, config)) {
         return 1;
@@ -397,3 +401,12 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+} // namespace bench
+} // namespace murdok
+
+#ifndef MURDOK_NO_BENCH_MAIN
+int main(int argc, char* argv[]) {
+    return murdok::bench::run_murdok_bench(argc, argv);
+}
+#endif

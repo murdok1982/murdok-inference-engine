@@ -177,27 +177,68 @@ bool MurdokCompiler::compile_gguf_to_murdok(
     return true;
 }
 
-bool MurdokCompiler::verify_murdok_file(const std::string& murdok_path, MurdokHeader* out_hdr) {
-    if (!fs::exists(murdok_path)) return false;
+ContainerValidationResult MurdokCompiler::validate_container(const std::string& murdok_path) {
+    ContainerValidationResult res;
+    if (!fs::exists(murdok_path)) {
+        res.error_message = "File does not exist: " + murdok_path;
+        return res;
+    }
+
+    uintmax_t fsize = fs::file_size(murdok_path);
+    if (fsize < sizeof(MurdokHeader)) {
+        res.error_message = "File size (" + std::to_string(fsize) + " bytes) is smaller than header (" + std::to_string(sizeof(MurdokHeader)) + " bytes)";
+        return res;
+    }
 
     std::ifstream file(murdok_path, std::ios::binary);
-    if (!file.is_open()) return false;
+    if (!file.is_open()) {
+        res.error_message = "Cannot open file for reading";
+        return res;
+    }
 
     MurdokHeader hdr;
     file.read(reinterpret_cast<char*>(&hdr), sizeof(hdr));
-    if (file.gcount() != sizeof(hdr)) return false;
+    if (file.gcount() != sizeof(hdr)) {
+        res.error_message = "Truncated header read";
+        return res;
+    }
 
     if (std::memcmp(hdr.magic, MURDOK_MAGIC, 8) != 0) {
-        return false;
-    }
-    if (hdr.version != MURDOK_VERSION) {
-        return false;
-    }
-    if (hdr.alignment != 64) {
-        return false;
+        res.error_message = "Invalid magic signature (expected MURDOK01)";
+        return res;
     }
 
-    if (out_hdr) *out_hdr = hdr;
+    if (hdr.version != MURDOK_VERSION) {
+        res.error_message = "Unsupported format version: " + std::to_string(hdr.version);
+        return res;
+    }
+
+    if (hdr.alignment != 64) {
+        res.error_message = "Invalid alignment requirement: " + std::to_string(hdr.alignment) + " (must be 64 bytes)";
+        return res;
+    }
+
+    if (hdr.metadata_offset >= fsize || hdr.tensor_dir_offset >= fsize || hdr.tensor_data_offset > fsize) {
+        res.error_message = "Corrupted offset pointers exceeding file boundaries";
+        return res;
+    }
+
+    res.is_valid = true;
+    res.tensor_count = hdr.tensor_count;
+    res.alignment = hdr.alignment;
+    res.version = hdr.version;
+    res.total_size = fsize;
+    return res;
+}
+
+bool MurdokCompiler::verify_murdok_file(const std::string& murdok_path, MurdokHeader* out_hdr) {
+    auto res = validate_container(murdok_path);
+    if (!res.is_valid) return false;
+
+    if (out_hdr) {
+        std::ifstream file(murdok_path, std::ios::binary);
+        file.read(reinterpret_cast<char*>(out_hdr), sizeof(MurdokHeader));
+    }
     return true;
 }
 

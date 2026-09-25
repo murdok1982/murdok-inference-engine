@@ -4,6 +4,10 @@
 #include "murdok/murdok_format.h"
 #include "murdok/speculative.h"
 #include "murdok/static_graph.h"
+#include "nlohmann/json.hpp"
+
+#include "../murdok-server/server.h"
+#include "../murdok-bench/bench.h"
 
 #include <iostream>
 #include <string>
@@ -12,33 +16,56 @@
 #include <iomanip>
 
 namespace fs = std::filesystem;
+using json = nlohmann::json;
 
 static void print_main_help() {
     std::cout << "==========================================================\n";
-    std::cout << "         MuRDoK Inference Engine (MIE) v0.3.0             \n";
+    std::cout << "         MuRDoK Inference Engine (MIE) v0.4.0             \n";
     std::cout << "    Move less. Compute smarter. Infer faster. Benchmark.  \n";
     std::cout << "==========================================================\n\n"
               << "Usage: murdok <command> [options]\n\n"
               << "Commands:\n"
               << "  run <model> [options]    Start interactive local chat session with HUD\n"
-              << "                           Supports: GGUF, native .murdok binary, and --draft\n"
-              << "  compile <model.gguf>     Compile GGUF to native .murdok 64-byte aligned binary\n"
+              << "                           Options: --backend <auto|llama|murdok>, --draft <model>\n"
+              << "  compile <model.gguf>     Compile GGUF to .murdok 64-byte aligned container\n"
               << "  server [options]         Start OpenAI-compatible REST server & Web UI\n"
-              << "  optimize [options]       Auto-calibrate hardware and find optimal settings\n"
-              << "  hardware                 Inspect CPU, SIMD, cache hierarchy, and RAM\n"
-              << "  bench [options]          Run benchmarks: --kernels, --graph, --speculative\n"
+              << "  optimize [options]       Auto-calibrate hardware and persist ~/.murdok/profile.json\n"
+              << "  hardware [--json]        Inspect CPU, SIMD, cache hierarchy, and RAM\n"
+              << "  bench [options]          Run benchmarks: --kernels, --graph, --speculative, --json\n"
               << "  help                     Show this help screen\n\n"
               << "Examples:\n"
               << "  murdok run models/qwen2.5-0.5b-instruct-q4_k_m.gguf\n"
-              << "  murdok run models/qwen2.5-0.5b-instruct-q4_k_m.murdok\n"
-              << "  murdok run target.gguf --draft draft.gguf\n"
+              << "  murdok run models/qwen2.5-0.5b-instruct-q4_k_m.gguf --backend llama\n"
               << "  murdok compile models/model.gguf --output models/model.murdok\n"
-              << "  murdok bench --graph\n"
-              << "  murdok bench --kernels\n";
+              << "  murdok hardware --json\n"
+              << "  murdok bench --graph\n";
 }
 
-static int cmd_hardware() {
+static int cmd_hardware(bool json_mode) {
     auto hw = murdok::HardwareDetector::detect();
+
+    if (json_mode) {
+        json j;
+        j["cpu_brand"] = hw.cpu_brand;
+        j["cpu_vendor"] = hw.cpu_vendor;
+        j["physical_cores"] = hw.physical_cores;
+        j["logical_threads"] = hw.logical_threads;
+        j["cache"]["l1d_kb"] = hw.cache.l1d_kb;
+        j["cache"]["l1i_kb"] = hw.cache.l1i_kb;
+        j["cache"]["l2_kb"] = hw.cache.l2_kb;
+        j["cache"]["l3_kb"] = hw.cache.l3_kb;
+        j["cache"]["line_size"] = hw.cache.cache_line_size;
+        j["simd"]["sse42"] = hw.simd.sse42;
+        j["simd"]["fma"] = hw.simd.fma;
+        j["simd"]["avx"] = hw.simd.avx;
+        j["simd"]["avx2"] = hw.simd.avx2;
+        j["simd"]["avx512f"] = hw.simd.avx512f;
+        j["memory"]["total_ram_bytes"] = hw.memory.total_ram_bytes;
+        j["memory"]["available_ram_bytes"] = hw.memory.available_ram_bytes;
+        j["recommended_profile"] = murdok::HardwareDetector::profile_to_string(hw.recommended_profile);
+        std::cout << j.dump(2) << "\n";
+        return 0;
+    }
 
     std::cout << "========================================\n";
     std::cout << "        MuRDoK Hardware Analyzer        \n";
@@ -131,10 +158,12 @@ static int cmd_compile(int argc, char* argv[]) {
         return 1;
     }
 
-    murdok::format::MurdokHeader hdr;
-    if (murdok::format::MurdokCompiler::verify_murdok_file(output_path, &hdr)) {
-        std::cout << "\n[Verification Passed] Valid MURDOK01 binary, " << hdr.tensor_count
+    auto val = murdok::format::MurdokCompiler::validate_container(output_path);
+    if (val.is_valid) {
+        std::cout << "\n[Verification Passed] Valid MURDOK01 container, " << val.tensor_count
                   << " tensors with 64-byte alignment verified.\n";
+    } else {
+        std::cerr << "\n[Verification Warning] Container validation reported: " << val.error_message << "\n";
     }
     return 0;
 }
@@ -142,6 +171,7 @@ static int cmd_compile(int argc, char* argv[]) {
 static int cmd_run(int argc, char* argv[]) {
     std::string model_path;
     std::string draft_path;
+    std::string backend_str = "auto";
     std::string kv_type = "f16";
     int32_t n_ctx = 2048;
 
@@ -149,6 +179,8 @@ static int cmd_run(int argc, char* argv[]) {
         std::string arg = argv[i];
         if (arg == "--draft" && i + 1 < argc) {
             draft_path = argv[++i];
+        } else if (arg == "--backend" && i + 1 < argc) {
+            backend_str = argv[++i];
         } else if (arg == "--kv" && i + 1 < argc) {
             kv_type = argv[++i];
         } else if (arg == "--ctx" && i + 1 < argc) {
@@ -230,25 +262,35 @@ static int cmd_run(int argc, char* argv[]) {
     cfg.kv_type = kv_type;
     cfg.n_ctx = n_ctx;
 
-    if (!engine.load(cfg)) {
-        std::cerr << "Failed to load model into MuRDoK Engine.\n";
+    if (backend_str == "llama") {
+        cfg.backend_type = murdok::BackendType::LlamaCpp;
+    } else if (backend_str == "murdok") {
+        cfg.backend_type = murdok::BackendType::Murdok;
+    } else {
+        cfg.backend_type = murdok::BackendType::Auto;
+    }
+
+    auto err = engine.load(cfg);
+    if (err != murdok::ErrorCode::Success) {
+        std::cerr << "Failed to load model into MuRDoK Engine: "
+                  << murdok::error_code_to_string(err) << "\n";
         return 1;
     }
 
     auto hw = engine.get_hardware();
     double total_ram_gb = static_cast<double>(hw.memory.total_ram_bytes) / (1024.0 * 1024.0 * 1024.0);
     double model_mb = static_cast<double>(engine.get_model_size_bytes()) / (1024.0 * 1024.0);
-    std::string format_str = fs::path(model_path).extension() == ".murdok" ? "NATIVE .MURDOK (64B Aligned)" : "GGUF";
+    std::string format_str = fs::path(model_path).extension() == ".murdok" ? "MURDOK01 (64B Aligned Container)" : "GGUF";
 
     std::cout << "\n";
     std::cout << "+----------------------------------------------------+\n";
     std::cout << "|            MuRDoK Inference Engine                 |\n";
     std::cout << "+----------------------------------------------------+\n";
     std::cout << "| Model:    " << std::left << std::setw(41) << engine.get_model_name() << "|\n";
+    std::cout << "| Backend:  " << std::left << std::setw(41) << engine.get_backend_name() << "|\n";
     std::cout << "| Format:   " << std::left << std::setw(41) << format_str << "|\n";
     std::cout << "| Size:     " << std::left << std::setw(34) << (std::to_string(static_cast<int>(model_mb)) + " MB") << "       |\n";
     std::cout << "| CPU:      " << std::left << std::setw(41) << hw.cpu_brand << "|\n";
-    std::cout << "| Backend:  CPU AVX2 + FMA (Tuned)                   |\n";
     std::cout << "| KV Cache: " << std::left << std::setw(41) << cfg.kv_type << "|\n";
     std::cout << "| Threads:  " << engine.get_config().n_threads_gen << " Generation / "
               << engine.get_config().n_threads_prompt << " Prompt Batch           |\n";
@@ -295,7 +337,7 @@ static int cmd_run(int argc, char* argv[]) {
     return 0;
 }
 
-static int cmd_optimize(int argc, char* argv[]) {
+static int cmd_optimize(int argc, char* argv[], bool json_mode) {
     std::string model_path;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -310,15 +352,17 @@ static int cmd_optimize(int argc, char* argv[]) {
 
     auto hw = murdok::HardwareDetector::detect();
 
-    std::cout << "==========================================================\n";
-    std::cout << "         MuRDoK Auto-Calibrator & Optimizer               \n";
-    std::cout << "==========================================================\n";
-    std::cout << "Model:    " << model_path << "\n";
-    std::cout << "Host:     " << hw.cpu_brand << "\n";
-    std::cout << "Cores:    " << hw.physical_cores << " physical, " << hw.logical_threads << " logical\n";
-    std::cout << "SIMD:     AVX2: " << (hw.simd.avx2 ? "[YES]" : "[NO]") << ", FMA: " << (hw.simd.fma ? "[YES]" : "[NO]") << "\n";
-    std::cout << "----------------------------------------------------------\n";
-    std::cout << "Running automatic hardware sweep...\n\n";
+    if (!json_mode) {
+        std::cout << "==========================================================\n";
+        std::cout << "         MuRDoK Auto-Calibrator & Optimizer               \n";
+        std::cout << "==========================================================\n";
+        std::cout << "Model:    " << model_path << "\n";
+        std::cout << "Host:     " << hw.cpu_brand << "\n";
+        std::cout << "Cores:    " << hw.physical_cores << " physical, " << hw.logical_threads << " logical\n";
+        std::cout << "SIMD:     AVX2: " << (hw.simd.avx2 ? "[YES]" : "[NO]") << ", FMA: " << (hw.simd.fma ? "[YES]" : "[NO]") << "\n";
+        std::cout << "----------------------------------------------------------\n";
+        std::cout << "Running automatic hardware sweep...\n\n";
+    }
 
     std::vector<int> thread_candidates = {1, 2, static_cast<int>(hw.physical_cores), static_cast<int>(hw.logical_threads)};
     std::sort(thread_candidates.begin(), thread_candidates.end());
@@ -330,7 +374,9 @@ static int cmd_optimize(int argc, char* argv[]) {
     double best_prompt_toks = 0.0;
 
     for (int t : thread_candidates) {
-        std::cout << "  Benchmarking threads=" << t << " ... " << std::flush;
+        if (!json_mode) {
+            std::cout << "  Benchmarking threads=" << t << " ... " << std::flush;
+        }
         murdok::Engine engine;
         murdok::EngineConfig cfg;
         cfg.model_path = model_path;
@@ -338,16 +384,18 @@ static int cmd_optimize(int argc, char* argv[]) {
         cfg.n_threads_prompt = t;
         cfg.max_tokens = 32;
 
-        if (!engine.load(cfg)) {
-            std::cout << "[FAILED]\n";
+        if (engine.load(cfg) != murdok::ErrorCode::Success) {
+            if (!json_mode) std::cout << "[FAILED]\n";
             continue;
         }
 
         murdok::InferenceMetrics m;
         engine.complete("Explain cache locality in computers.", &m);
 
-        std::cout << "Gen: " << std::fixed << std::setprecision(2) << m.gen_tok_per_sec << " tok/s | "
-                  << "Prompt: " << m.prompt_tok_per_sec << " tok/s\n";
+        if (!json_mode) {
+            std::cout << "Gen: " << std::fixed << std::setprecision(2) << m.gen_tok_per_sec << " tok/s | "
+                      << "Prompt: " << m.prompt_tok_per_sec << " tok/s\n";
+        }
 
         if (m.gen_tok_per_sec > best_gen_toks) {
             best_gen_toks = m.gen_tok_per_sec;
@@ -359,7 +407,6 @@ static int cmd_optimize(int argc, char* argv[]) {
         }
     }
 
-    // Persist calibration profile to ~/.murdok/profile.json (Phase 7)
     murdok::MurdokProfile profile;
     profile.cpu_model = hw.cpu_brand;
     profile.recommended_profile = murdok::HardwareDetector::profile_to_string(hw.recommended_profile);
@@ -372,6 +419,22 @@ static int cmd_optimize(int argc, char* argv[]) {
     profile.measured_prompt_tok_s = best_prompt_toks;
 
     bool saved = murdok::ProfileManager::save_profile(profile);
+
+    if (json_mode) {
+        json j;
+        j["cpu_model"] = profile.cpu_model;
+        j["recommended_profile"] = profile.recommended_profile;
+        j["optimal_gen_threads"] = profile.optimal_gen_threads;
+        j["optimal_prompt_threads"] = profile.optimal_prompt_threads;
+        j["optimal_batch_size"] = profile.optimal_batch_size;
+        j["kv_cache_type"] = profile.kv_cache_type;
+        j["cache_line_alignment"] = profile.cache_line_alignment;
+        j["measured_gen_tok_s"] = profile.measured_gen_tok_s;
+        j["measured_prompt_tok_s"] = profile.measured_prompt_tok_s;
+        j["saved"] = saved;
+        std::cout << j.dump(2) << "\n";
+        return 0;
+    }
 
     std::cout << "\n+----------------------------------------------------+\n";
     std::cout << "|         MuRDoK Optimal Calibrated Profile          |\n";
@@ -397,34 +460,40 @@ int main(int argc, char* argv[]) {
     }
 
     std::string cmd = argv[1];
+
+    // Check for global --json flag
+    bool has_json = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--json") has_json = true;
+    }
+
     if (cmd == "run") {
         return cmd_run(argc, argv);
     } else if (cmd == "compile") {
         return cmd_compile(argc, argv);
     } else if (cmd == "hardware") {
-        return cmd_hardware();
+        return cmd_hardware(has_json);
     } else if (cmd == "optimize") {
-        return cmd_optimize(argc, argv);
+        return cmd_optimize(argc, argv, has_json);
     } else if (cmd == "server") {
-        std::string server_exe = "murdok-serve.exe";
-        if (fs::exists("build/bin/Release/murdok-serve.exe")) {
-            server_exe = "build\\bin\\Release\\murdok-serve.exe";
-        } else if (fs::exists("build/bin/Release/murdok-server.exe")) {
-            server_exe = "build\\bin\\Release\\murdok-server.exe";
-        }
-        std::string cmdline = server_exe;
-        for (int i = 2; i < argc; ++i) {
-            cmdline += " " + std::string(argv[i]);
-        }
-        return system(cmdline.c_str());
+        // Direct in-process server call (eliminating shell system())
+        return murdok::server::run_murdok_server(argc - 1, argv + 1);
     } else if (cmd == "bench") {
         if (argc > 2 && std::string(argv[2]) == "--kernels") {
+            auto kres = murdok::kernels::benchmark_simd_kernels(65536, 10000);
+            if (has_json) {
+                json j;
+                j["scalar_gflops"] = kres.scalar_gflops;
+                j["avx2_gflops"] = kres.avx2_gflops;
+                j["speedup"] = kres.speedup;
+                j["verified"] = kres.avx2_verified;
+                std::cout << j.dump(2) << "\n";
+                return 0;
+            }
             std::cout << "==========================================================\n";
             std::cout << "      MuRDoK SIMD Vectorized Kernel Micro-Benchmark       \n";
             std::cout << "==========================================================\n";
             std::cout << "Benchmarking custom AVX2+FMA vs Scalar Dot-Product...\n\n";
-
-            auto kres = murdok::kernels::benchmark_simd_kernels(65536, 10000);
             std::cout << "Scalar Implementation:   " << std::fixed << std::setprecision(2) << kres.scalar_gflops << " GFLOP/s\n";
             std::cout << "MuRDoK AVX2+FMA Kernel:  " << std::fixed << std::setprecision(2) << kres.avx2_gflops << " GFLOP/s\n";
             std::cout << "Speedup Factor:          " << std::fixed << std::setprecision(2) << kres.speedup << "x faster\n";
@@ -436,15 +505,11 @@ int main(int argc, char* argv[]) {
             murdok::graph::StaticGraphPlanner::benchmark_execution(1000);
             return 0;
         } else if (argc > 2 && std::string(argv[2]) == "--speculative") {
-            std::cout << "==========================================================\n";
-            std::cout << "         MuRDoK Speculative Decoding Benchmark            \n";
-            std::cout << "==========================================================\n";
             std::string def_model = find_default_model();
             if (def_model.empty()) {
                 std::cerr << "Error: No default model found for speculative benchmark.\n";
                 return 1;
             }
-            std::cout << "Benchmarking Adaptive Draft Speculative Decoding on: " << def_model << "\n";
             murdok::speculative::SpeculativeConfig sc;
             sc.target_model_path = def_model;
             sc.draft_model_path = def_model;
@@ -456,6 +521,21 @@ int main(int argc, char* argv[]) {
             }
             murdok::speculative::SpeculativeMetrics sm;
             se.generate("Explain static memory arenas in inference runtimes.", nullptr, &sm);
+            if (has_json) {
+                json j;
+                j["accepted_tokens"] = sm.total_accepted_tokens;
+                j["drafted_tokens"] = sm.total_drafted_tokens;
+                j["acceptance_rate_pct"] = sm.acceptance_rate;
+                j["dynamic_k"] = sm.current_k;
+                j["throughput_tok_s"] = sm.generation_tok_per_sec;
+                std::cout << j.dump(2) << "\n";
+                return 0;
+            }
+            std::cout << "==========================================================\n";
+            std::cout << "         MuRDoK Speculative Decoding Benchmark            \n";
+            std::cout << "==========================================================\n";
+            std::cout << "Benchmarking Adaptive Draft Speculative Decoding on: " << def_model << "\n";
+            std::cout << "Note: Target == Draft serves as deterministic correctness control.\n";
             std::cout << "Accepted Tokens:  " << sm.total_accepted_tokens << "\n";
             std::cout << "Drafted Tokens:   " << sm.total_drafted_tokens << "\n";
             std::cout << "Acceptance Rate:  " << std::fixed << std::setprecision(2) << sm.acceptance_rate << " %\n";
@@ -465,15 +545,8 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        std::string bench_exe = "murdok-bench.exe";
-        if (fs::exists("build/bin/Release/murdok-bench.exe")) {
-            bench_exe = "build\\bin\\Release\\murdok-bench.exe";
-        }
-        std::string cmdline = bench_exe;
-        for (int i = 2; i < argc; ++i) {
-            cmdline += " " + std::string(argv[i]);
-        }
-        return system(cmdline.c_str());
+        // Direct in-process benchmark execution (eliminating shell system())
+        return murdok::bench::run_murdok_bench(argc - 1, argv + 1);
     } else if (cmd == "help" || cmd == "--help" || cmd == "-h") {
         print_main_help();
         return 0;

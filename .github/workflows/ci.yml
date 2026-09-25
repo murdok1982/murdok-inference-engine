@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} (${{ matrix.build_type }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        build_type: [Release]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28.x'
+
+      - name: Configure CMake (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build
+
+      - name: Build
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Run Unit & Integration Tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./build/bin/murdok-test
+
+      - name: Run Unit & Integration Tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          .\build\bin\${{ matrix.build_type }}\murdok-test.exe
+
+      - name: Verify CLI Tools (--json and --help) (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./build/bin/murdok hardware --json
+          ./build/bin/murdok bench --kernels --json
+
+      - name: Verify CLI Tools (--json and --help) (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          .\build\bin\${{ matrix.build_type }}\murdok.exe hardware --json
+          .\build\bin\${{ matrix.build_type }}\murdok.exe bench --kernels --json

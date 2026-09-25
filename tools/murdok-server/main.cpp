@@ -9,6 +9,7 @@
 
 #include "murdok/murdok.h"
 #include "src/server/web_ui.h"
+#include "server.h"
 
 #include <iostream>
 #include <string>
@@ -37,7 +38,10 @@ static void print_usage(const char* exe) {
               << "  --help          Show this message\n";
 }
 
-int main(int argc, char* argv[]) {
+namespace murdok {
+namespace server {
+
+int run_murdok_server(int argc, char* argv[]) {
     ServerConfig s_cfg;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -79,8 +83,10 @@ int main(int argc, char* argv[]) {
     e_cfg.n_ctx = s_cfg.n_ctx;
     e_cfg.n_threads_gen = s_cfg.n_threads;
 
-    if (!engine.load(e_cfg)) {
-        std::cerr << "Failed to initialize and load model into MuRDoK Engine.\n";
+    auto err = engine.load(e_cfg);
+    if (err != murdok::ErrorCode::Success) {
+        std::cerr << "Failed to initialize and load model into MuRDoK Engine: "
+                  << murdok::error_code_to_string(err) << "\n";
         return 1;
     }
 
@@ -242,3 +248,12 @@ int main(int argc, char* argv[]) {
     svr.listen(s_cfg.host, s_cfg.port);
     return 0;
 }
+
+} // namespace server
+} // namespace murdok
+
+#ifndef MURDOK_NO_SERVER_MAIN
+int main(int argc, char* argv[]) {
+    return murdok::server::run_murdok_server(argc, argv);
+}
+#endif

@@ -1,3 +1,5 @@
 timestamp,engine,model,threads,prompt_tokens,prompt_tok_s,gen_tokens,gen_tok_s,ttft_ms,tpot_ms,peak_mem_mb
 2026-09-20T07:36:18Z,llama.cpp (Baseline Reference),qwen2.5-0.5b-instruct-q4_k_m.gguf,4,48,94.5628,128,33.2667,509.707,30.0601,492.902
 2026-09-20T07:36:30Z,llama.cpp (Baseline Reference),qwen2.5-0.5b-instruct-q4_k_m.gguf,8,48,117.097,128,30.7484,412.164,32.522,492.832
+2026-09-25T12:14:36Z,llama.cpp (Baseline Reference),qwen2.5-0.5b-instruct-q4_k_m.gguf,4,11,111.094,128,30.8747,99.9332,32.389,489.918
+2026-09-25T12:16:22Z,llama.cpp (Baseline Reference),qwen2.5-0.5b-instruct-q4_k_m.gguf,8,11,135.515,128,39.9231,83.5688,25.0481,489.922
